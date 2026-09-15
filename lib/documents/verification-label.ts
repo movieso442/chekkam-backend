@@ -20,6 +20,7 @@ export type VerificationLabelDocument = {
   qr_payload: string;
   file_hash: string | null;
   signature: string | null;
+  signing_public_key_snapshot: string | null;
   institution_signing_public_key: string | null;
 };
 
@@ -31,7 +32,7 @@ export async function fetchDocumentForVerificationLabel(
   const { data: doc } = await admin
     .from("documents")
     .select(
-      "id, institution_id, document_type, recipient_name, verification_id, qr_payload, file_hash, signature, institutions(name, signing_public_key)"
+      "id, institution_id, document_type, recipient_name, verification_id, qr_payload, file_hash, signature, signing_public_key_snapshot, institutions(name, signing_public_key)"
     )
     .eq("id", documentId)
     .maybeSingle();
@@ -49,6 +50,7 @@ export async function fetchDocumentForVerificationLabel(
     qr_payload: doc.qr_payload,
     file_hash: doc.file_hash,
     signature: doc.signature,
+    signing_public_key_snapshot: doc.signing_public_key_snapshot ?? null,
     institution_signing_public_key: institution?.signing_public_key ?? null,
   };
 }
@@ -60,8 +62,9 @@ export async function fetchDocumentForVerificationLabel(
  * whose cryptographic chain cannot be checked.
  */
 export function hasValidRegistrySignature(doc: VerificationLabelDocument): boolean {
-  if (!doc.file_hash || !doc.signature || !doc.institution_signing_public_key) return false;
-  return verifySignature(doc.file_hash, doc.signature, doc.institution_signing_public_key);
+  const signingKey = doc.signing_public_key_snapshot ?? doc.institution_signing_public_key;
+  if (!doc.file_hash || !doc.signature || !signingKey) return false;
+  return verifySignature(doc.file_hash, doc.signature, signingKey);
 }
 
 /** A neutral, predictable filename. It does not advertise a third party on the issuer's document. */

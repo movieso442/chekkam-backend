@@ -82,6 +82,21 @@ describe("verifyByIdOrPin", () => {
     const result = await verifyByIdOrPin(admin as never, "CHK-XXXX-XXXX", "web");
     expect(result.status).toBe("tampered");
   });
+
+  it("keeps a historic document genuine after its institution rotates to a new public key", async () => {
+    const admin = makeAdmin({
+      id: "doc-1",
+      status: "active",
+      expiry_date: null,
+      file_hash: fileHash,
+      signature: validSignature,
+      signing_public_key_snapshot: publicKey,
+      document_type: "certificate",
+      institutions: { name: "Test University", signing_public_key: wrongPublicKey },
+    });
+    const result = await verifyByIdOrPin(admin as never, "CHK-XXXX-XXXX", "web");
+    expect(result.status).toBe("genuine");
+  });
 });
 
 describe("verifyByUpload", () => {

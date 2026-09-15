@@ -21,6 +21,7 @@ const sampleDoc: VerificationLabelDocument = {
   qr_payload: "http://localhost:3000/verify/CHK-4F7K-9QRT",
   file_hash: null,
   signature: null,
+  signing_public_key_snapshot: null,
   institution_signing_public_key: null,
 };
 

@@ -106,7 +106,7 @@ export async function verifyByIdOrPin(
   const { data: doc } = await admin
     .from("documents")
     .select(
-      "id, verification_id, document_type, recipient_name, status, issued_at, revoked_at, revocation_reason, expiry_date, file_hash, signature, institutions(name, verified, signing_public_key)"
+      "id, verification_id, document_type, recipient_name, status, issued_at, revoked_at, revocation_reason, expiry_date, file_hash, signature, signing_public_key_snapshot, institutions(name, verified, signing_public_key)"
     )
     .or(`verification_id.eq.${verificationId},pin_code.eq.${verificationId}`)
     .maybeSingle();
@@ -144,7 +144,13 @@ export async function verifyByIdOrPin(
     };
   }
 
-  if (!hasValidStoredSignature(doc.file_hash, doc.signature, institution?.signing_public_key)) {
+  if (
+    !hasValidStoredSignature(
+      doc.file_hash,
+      doc.signature,
+      doc.signing_public_key_snapshot ?? institution?.signing_public_key
+    )
+  ) {
     await logAttempt(admin, doc.id, verificationId, "tampered", channel);
     return {
       status: "tampered",
@@ -185,7 +191,7 @@ export async function verifyByUpload(
     const { data: doc } = await admin
       .from("documents")
       .select(
-        "id, verification_id, file_hash, signature, document_type, recipient_name, status, revoked_at, revocation_reason, expiry_date, institutions(name, verified, signing_public_key)"
+        "id, verification_id, file_hash, signature, signing_public_key_snapshot, document_type, recipient_name, status, revoked_at, revocation_reason, expiry_date, institutions(name, verified, signing_public_key)"
       )
       .or(`verification_id.eq.${verificationId},pin_code.eq.${verificationId}`)
       .maybeSingle();
@@ -226,7 +232,7 @@ export async function verifyByUpload(
     const signatureValid = hasValidStoredSignature(
       doc.file_hash,
       doc.signature,
-      institution?.signing_public_key
+      doc.signing_public_key_snapshot ?? institution?.signing_public_key
     );
     const genuine = hashMatches && signatureValid;
     await logAttempt(admin, doc.id, verificationId, genuine ? "genuine" : "tampered", channel);
@@ -249,7 +255,7 @@ export async function verifyByUpload(
   const { data: doc } = await admin
     .from("documents")
     .select(
-      "id, verification_id, document_type, status, revocation_reason, expiry_date, file_hash, signature, institutions(name, verified, signing_public_key)"
+      "id, verification_id, document_type, status, revocation_reason, expiry_date, file_hash, signature, signing_public_key_snapshot, institutions(name, verified, signing_public_key)"
     )
     .eq("file_hash", computedHash)
     .maybeSingle();
@@ -284,7 +290,13 @@ export async function verifyByUpload(
   } else if (isExpired(doc.expiry_date)) {
     result = "expired";
     reason = `This document's validity period ended on ${doc.expiry_date}.`;
-  } else if (!hasValidStoredSignature(doc.file_hash, doc.signature, institution?.signing_public_key)) {
+  } else if (
+    !hasValidStoredSignature(
+      doc.file_hash,
+      doc.signature,
+      doc.signing_public_key_snapshot ?? institution?.signing_public_key
+    )
+  ) {
     result = "tampered";
     reason = TAMPERED_SIGNATURE_REASON;
   } else {

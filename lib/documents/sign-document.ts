@@ -1,9 +1,16 @@
 import { SupabaseClient } from "@supabase/supabase-js";
-import { hashDocument, getInstitutionPrivateKey, signHash } from "@/lib/crypto/sign";
+import {
+  hashDocument,
+  getInstitutionPrivateKey,
+  normalizePublicKeyPem,
+  publicKeyFromPrivateKey,
+  signHash,
+} from "@/lib/crypto/sign";
 import { generateVerificationId, generatePinCode } from "@/lib/crypto/ids";
 import { buildVerificationUrl, generateQrDataUrl } from "@/lib/crypto/qrcode";
 import { embedInvisibleMarker } from "@/lib/documents/embed";
 import { bufferToBytea } from "@/lib/documents/bytea";
+import { ConfigError } from "@/lib/errors";
 
 /**
  * The one and only document signing path (SRS 10.1). Extracted from
@@ -77,6 +84,43 @@ export async function signDocumentCore(
 
   const fileHash = hashDocument(signedBuffer);
   const privateKey = getInstitutionPrivateKey(input.institutionId);
+  const signingPublicKey = publicKeyFromPrivateKey(privateKey);
+
+  // Never issue a record with a private key that does not correspond to the
+  // issuer's active registry key. That failure used to create a signature
+  // which every later verification reported as Tampered. Rotation is an
+  // explicit, auditable operation (scripts/rotate-institution-signing-key.ts)
+  // that preserves historic documents through their key snapshots.
+  const { data: institution, error: institutionError } = await admin
+    .from("institutions")
+    .select("signing_public_key")
+    .eq("id", input.institutionId)
+    .maybeSingle();
+  if (institutionError) throw institutionError;
+  if (!institution?.signing_public_key) {
+    throw new ConfigError("This institution has no registered signing public key.");
+  }
+  if (normalizePublicKeyPem(institution.signing_public_key) !== signingPublicKey) {
+    throw new ConfigError(
+      "The configured signing key does not match this institution's registered key. " +
+        "An administrator must complete the explicit signing-key rotation before issuing documents."
+    );
+  }
+
+  // Register the active key before inserting the immutable document snapshot.
+  // This also keeps ordinary onboarding/seed paths compatible with the
+  // database trigger introduced for safe key rotation.
+  const { error: keyHistoryError } = await admin
+    .from("institution_signing_keys")
+    .upsert(
+      { institution_id: input.institutionId, public_key: signingPublicKey },
+      { onConflict: "institution_id,public_key", ignoreDuplicates: true }
+    );
+  if (keyHistoryError) {
+    throw new ConfigError(
+      "Document signing key history is not configured. Apply the latest database migration before issuing documents."
+    );
+  }
   const signature = signHash(fileHash, privateKey);
 
   const { data, error } = await admin
@@ -92,6 +136,7 @@ export async function signDocumentCore(
       pin_code: pinCode,
       expiry_date: input.expiryDate ?? null,
       issued_at: input.issuedAt,
+      signing_public_key_snapshot: signingPublicKey,
       original_file_data: embedded ? bufferToBytea(signedBuffer) : null,
       original_file_mime_type: embedded?.mimeType ?? null,
       original_file_name: embedded ? (input.fileName ?? "document") : null,

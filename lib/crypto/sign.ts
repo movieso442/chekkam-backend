@@ -25,6 +25,25 @@ export function getInstitutionPrivateKey(institutionId: string): string {
 }
 
 /**
+ * Canonical PEM form used for registry comparisons and per-document key
+ * snapshots. Normalising line endings avoids false key-mismatch failures
+ * when a secret manager rewrites PEM newlines on deployment.
+ */
+export function normalizePublicKeyPem(publicKeyPem: string): string {
+  return publicKeyPem.replace(/\r\n/g, "\n").trim();
+}
+
+/** Returns the public half of an ECDSA private key without exposing it. */
+export function publicKeyFromPrivateKey(privateKeyPem: string): string {
+  return normalizePublicKeyPem(
+    crypto
+      .createPublicKey(privateKeyPem)
+      .export({ type: "spki", format: "pem" })
+      .toString()
+  );
+}
+
+/**
  * Looks up Chekkam's own platform-level ECDSA private key, used to sign
  * verification receipts (FR-111) — a receipt attests "Chekkam verified
  * this," not "institution X issued this," so it is never signed with an
